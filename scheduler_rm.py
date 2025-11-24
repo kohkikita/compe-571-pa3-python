@@ -4,37 +4,41 @@ from scheduler_common import *
 def schedule_rm(config, jobs):
     current_time = 0
     schedule = []
-    
-    # Reset all jobs
+
+    # reset job state
     for job in jobs:
         job.completed = False
         job.remaining_time = None
         job.selected_freq_index = None
-    
+
     while current_time < config.max_time:
-        # Find job with highest priority (shortest period) that's ready
+        # highest priority = shortest period (deadline)
         highest_priority_job = None
         shortest_period = float('inf')
-        
-        for job in jobs:
-            if not job.completed and job.release_time <= current_time:
-                period = job.task.deadline
+        for j in jobs:
+            if (not j.completed and j.release_time <= current_time):
+                period = j.task.deadline
                 if period < shortest_period:
                     shortest_period = period
-                    highest_priority_job = job
-        
+                    highest_priority_job = j
+
         if highest_priority_job is None:
-            # Find next release time
-            next_release = config.max_time
-            for job in jobs:
-                if not job.completed and job.release_time > current_time:
-                    if job.release_time < next_release:
-                        next_release = job.release_time
-            
+            # ---- patched idle branch: DO NOT pad to max_time ----
+            next_release = None
+            for j in jobs:
+                if (not j.completed and
+                    j.release_time > current_time and
+                    j.release_time < config.max_time):
+                    if next_release is None or j.release_time < next_release:
+                        next_release = j.release_time
+
+            if next_release is None:
+                break
+
             idle_time = next_release - current_time
             if current_time + idle_time > config.max_time:
                 idle_time = config.max_time - current_time
-            
+
             if idle_time > 0:
                 entry = ScheduleEntry()
                 entry.start_time = current_time
@@ -47,37 +51,32 @@ def schedule_rm(config, jobs):
             else:
                 break
         else:
-            # Always use maximum frequency for RM
-            freq = config.frequencies[0]
+            # RM: always max freq
             freq_index = 0
-            
-            # Initialize remaining time if this is the first execution of this job
+            freq = config.frequencies[freq_index]
+
             if highest_priority_job.remaining_time is None:
                 highest_priority_job.remaining_time = highest_priority_job.task.wcet[freq_index]
-            
-            # Check for preemption: find next event (release or deadline)
+
+            # preemption: any shorter period release
             next_event_time = config.max_time
-            
-            # Check for new job releases that could preempt
-            for job in jobs:
-                if (not job.completed and 
-                    job.release_time > current_time and 
-                    job.release_time < next_event_time):
-                    # Check if this job has higher priority (shorter period)
-                    if job.task.deadline < highest_priority_job.task.deadline:
-                        next_event_time = job.release_time
-            
-            # Execute until completion, preemption, or max_time
+            for j in jobs:
+                if (not j.completed and
+                    j.release_time > current_time and
+                    j.release_time < next_event_time and
+                    j.task.deadline < highest_priority_job.task.deadline):
+                    next_event_time = j.release_time
+
             execution_time = min(
                 highest_priority_job.remaining_time,
                 next_event_time - current_time,
                 config.max_time - current_time
             )
-            
+
             if execution_time > 0:
                 power = config.powers[freq_index]
                 energy = (power / 1000.0) * execution_time
-                
+
                 entry = ScheduleEntry()
                 entry.start_time = current_time
                 entry.task_name = highest_priority_job.task.name
@@ -85,27 +84,26 @@ def schedule_rm(config, jobs):
                 entry.duration = execution_time
                 entry.energy = energy
                 schedule.append(entry)
-                
+
                 current_time += execution_time
                 highest_priority_job.remaining_time -= execution_time
-                
-                # Mark as completed if finished
+
                 if highest_priority_job.remaining_time <= 0:
                     highest_priority_job.completed = True
-    
+            else:
+                break
+
     return schedule
 
 def main():
     if len(sys.argv) < 2:
         print(f"Usage: {sys.argv[0]} <input_file>")
         return 1
-    
     config = SystemConfig()
     parse_input(sys.argv[1], config)
     jobs = generate_jobs(config)
     schedule = schedule_rm(config, jobs)
     print_schedule(schedule, "RM")
-    
     return 0
 
 if __name__ == "__main__":
