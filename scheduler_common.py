@@ -111,11 +111,12 @@ def print_schedule(schedule, algorithm_name):
             print(f"{entry.start_time} {entry.task_name} {entry.frequency} {entry.duration} {entry.energy:.3f}J")
         total_energy += entry.energy
     
-    total_time = schedule[-1].start_time + schedule[-1].duration
-    idle_percentage = (idle_time / total_time) * 100.0
-    
-    print(f"\n----------------------------------------------------------------")
-    print(f"Total Energy Consumption: {total_energy:.3f} J")
-    print(f"Percentage Idle Time: {idle_percentage:.2f}%")
-    print(f"Total Execution Time: {total_time} seconds")
-    print(f"================================================================\n")
+    if schedule:
+        total_time = schedule[-1].start_time + schedule[-1].duration
+        idle_percentage = (idle_time / total_time) * 100.0
+        
+        print(f"\n----------------------------------------------------------------")
+        print(f"Total Energy Consumption: {total_energy:.3f} J")
+        print(f"Percentage Idle Time: {idle_percentage:.2f}%")
+        print(f"Total Execution Time: {total_time} seconds")
+        print(f"================================================================\n")
