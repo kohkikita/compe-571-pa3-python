@@ -8,9 +8,11 @@ def schedule_rm(config, jobs):
     # Reset all jobs
     for job in jobs:
         job.completed = False
+        job.remaining_time = None
+        job.selected_freq_index = None
     
     while current_time < config.max_time:
-        # Find job with highest priority (shortest period)
+        # Find job with highest priority (shortest period) that's ready
         highest_priority_job = None
         shortest_period = float('inf')
         
@@ -49,20 +51,47 @@ def schedule_rm(config, jobs):
             freq = config.frequencies[0]
             freq_index = 0
             
-            wcet = highest_priority_job.task.wcet[freq_index]
-            power = config.powers[freq_index]
-            energy = (power / 1000.0) * wcet
+            # Initialize remaining time if this is the first execution of this job
+            if highest_priority_job.remaining_time is None:
+                highest_priority_job.remaining_time = highest_priority_job.task.wcet[freq_index]
             
-            entry = ScheduleEntry()
-            entry.start_time = current_time
-            entry.task_name = highest_priority_job.task.name
-            entry.frequency = freq
-            entry.duration = wcet
-            entry.energy = energy
-            schedule.append(entry)
+            # Check for preemption: find next event (release or deadline)
+            next_event_time = config.max_time
             
-            current_time += wcet
-            highest_priority_job.completed = True
+            # Check for new job releases that could preempt
+            for job in jobs:
+                if (not job.completed and 
+                    job.release_time > current_time and 
+                    job.release_time < next_event_time):
+                    # Check if this job has higher priority (shorter period)
+                    if job.task.deadline < highest_priority_job.task.deadline:
+                        next_event_time = job.release_time
+            
+            # Execute until completion, preemption, or max_time
+            execution_time = min(
+                highest_priority_job.remaining_time,
+                next_event_time - current_time,
+                config.max_time - current_time
+            )
+            
+            if execution_time > 0:
+                power = config.powers[freq_index]
+                energy = (power / 1000.0) * execution_time
+                
+                entry = ScheduleEntry()
+                entry.start_time = current_time
+                entry.task_name = highest_priority_job.task.name
+                entry.frequency = freq
+                entry.duration = execution_time
+                entry.energy = energy
+                schedule.append(entry)
+                
+                current_time += execution_time
+                highest_priority_job.remaining_time -= execution_time
+                
+                # Mark as completed if finished
+                if highest_priority_job.remaining_time <= 0:
+                    highest_priority_job.completed = True
     
     return schedule
 

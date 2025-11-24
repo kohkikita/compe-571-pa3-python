@@ -32,9 +32,11 @@ def schedule_eeedf(config, jobs):
     # Reset all jobs
     for job in jobs:
         job.completed = False
+        job.remaining_time = None
+        job.selected_freq_index = None
     
     while current_time < config.max_time:
-        # Find job with earliest deadline
+        # Find job with earliest deadline that's ready
         earliest_job = None
         earliest_deadline = float('inf')
         
@@ -69,30 +71,58 @@ def schedule_eeedf(config, jobs):
             else:
                 break
         else:
-            # Energy-efficient: select optimal frequency
-            freq = select_frequency_ee(config, earliest_job, current_time)
+            # Select frequency if not already selected for this job
+            if earliest_job.selected_freq_index is None:
+                freq = select_frequency_ee(config, earliest_job, current_time)
+                # Find frequency index
+                freq_index = 0
+                for i in range(NUM_FREQUENCIES):
+                    if config.frequencies[i] == freq:
+                        freq_index = i
+                        break
+                earliest_job.selected_freq_index = freq_index
+                earliest_job.remaining_time = earliest_job.task.wcet[freq_index]
             
-            # Find frequency index
-            freq_index = 0
-            for i in range(NUM_FREQUENCIES):
-                if config.frequencies[i] == freq:
-                    freq_index = i
-                    break
+            freq_index = earliest_job.selected_freq_index
+            freq = config.frequencies[freq_index]
             
-            wcet = earliest_job.task.wcet[freq_index]
-            power = config.powers[freq_index]
-            energy = (power / 1000.0) * wcet
+            # Check for preemption: find next event (release that could preempt)
+            next_event_time = config.max_time
             
-            entry = ScheduleEntry()
-            entry.start_time = current_time
-            entry.task_name = earliest_job.task.name
-            entry.frequency = freq
-            entry.duration = wcet
-            entry.energy = energy
-            schedule.append(entry)
+            # Check for new job releases that could preempt (earlier deadline)
+            for job in jobs:
+                if (not job.completed and 
+                    job.release_time > current_time and 
+                    job.release_time < next_event_time):
+                    # Check if this job has earlier deadline
+                    if job.absolute_deadline < earliest_job.absolute_deadline:
+                        next_event_time = job.release_time
             
-            current_time += wcet
-            earliest_job.completed = True
+            # Execute until completion, preemption, or max_time
+            execution_time = min(
+                earliest_job.remaining_time,
+                next_event_time - current_time,
+                config.max_time - current_time
+            )
+            
+            if execution_time > 0:
+                power = config.powers[freq_index]
+                energy = (power / 1000.0) * execution_time
+                
+                entry = ScheduleEntry()
+                entry.start_time = current_time
+                entry.task_name = earliest_job.task.name
+                entry.frequency = freq
+                entry.duration = execution_time
+                entry.energy = energy
+                schedule.append(entry)
+                
+                current_time += execution_time
+                earliest_job.remaining_time -= execution_time
+                
+                # Mark as completed if finished
+                if earliest_job.remaining_time <= 0:
+                    earliest_job.completed = True
     
     return schedule
 

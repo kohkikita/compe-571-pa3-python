@@ -15,6 +15,8 @@ class Job:
         self.absolute_deadline = 0
         self.job_number = 0
         self.completed = False
+        self.remaining_time = None
+        self.selected_freq_index = None
 
 class ScheduleEntry:
     def __init__(self):
@@ -36,22 +38,23 @@ class SystemConfig:
 def parse_input(filename, config):
     try:
         with open(filename, 'r') as file:
-            lines = file.readlines()
+            lines = [line.strip() for line in file.readlines() if line.strip()]
             line_idx = 0
             
-            num_tasks, max_time = map(int, lines[line_idx].split())
-            config.num_tasks = num_tasks
-            config.max_time = max_time
-            line_idx += 1
+            # First line: num_tasks max_time power1 power2 power3 power4 idle_power
+            first_line = list(map(int, lines[line_idx].split()))
+            config.num_tasks = first_line[0]
+            config.max_time = first_line[1]
             
-            powers = list(map(int, lines[line_idx].split()))
+            # Read powers for each frequency (next 4 values)
             for i in range(NUM_FREQUENCIES):
-                config.powers[i] = powers[i]
+                config.powers[i] = first_line[2 + i]
+            
+            # Read idle power (last value on first line)
+            config.idle_power = first_line[6]
             line_idx += 1
             
-            config.idle_power = int(lines[line_idx].strip())
-            line_idx += 1
-            
+            # Read tasks
             for i in range(config.num_tasks):
                 parts = lines[line_idx].split()
                 config.tasks[i].name = parts[0]
@@ -62,6 +65,10 @@ def parse_input(filename, config):
                 
     except FileNotFoundError:
         print(f"Error: Cannot open file {filename}")
+        exit(1)
+    except (ValueError, IndexError) as e:
+        print(f"Error parsing input file: {e}")
+        print(f"Please check the input file format")
         exit(1)
 
 def generate_jobs(config):
@@ -79,6 +86,8 @@ def generate_jobs(config):
             job.absolute_deadline = release_time + task.deadline
             job.job_number = job_num
             job.completed = False
+            job.remaining_time = None
+            job.selected_freq_index = None
             
             jobs.append(job)
             release_time += task.deadline
