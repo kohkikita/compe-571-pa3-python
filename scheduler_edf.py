@@ -9,91 +9,81 @@ def schedule_edf(config, jobs):
     for job in jobs:
         job.completed = False
         job.remaining_time = None
-        job.selected_freq_index = None
 
     while current_time < config.max_time:
-        # pick earliest-deadline ready job
-        earliest_job = None
-        earliest_deadline = float('inf')
-        for j in jobs:
-            if (not j.completed and
-                j.release_time <= current_time and
-                j.absolute_deadline < earliest_deadline):
-                earliest_deadline = j.absolute_deadline
-                earliest_job = j
-
-        if earliest_job is None:
-            # ---- patched idle branch: DO NOT pad to max_time ----
+        # Find ALL ready jobs (not just one)
+        ready_jobs = [j for j in jobs if not j.completed and j.release_time <= current_time]
+        
+        if not ready_jobs:
+            # Find next job release
             next_release = None
             for j in jobs:
-                if (not j.completed and
-                    j.release_time > current_time and
-                    j.release_time < config.max_time):
+                if not j.completed and j.release_time > current_time and j.release_time < config.max_time:
                     if next_release is None or j.release_time < next_release:
                         next_release = j.release_time
-
-            # stop if nothing else before cutoff
+            
             if next_release is None:
                 break
-
+            
+            # Idle until next release
             idle_time = next_release - current_time
-            # cap to cutoff just in case
-            if current_time + idle_time > config.max_time:
-                idle_time = config.max_time - current_time
-
-            if idle_time > 0:
-                entry = ScheduleEntry()
-                entry.start_time = current_time
-                entry.task_name = "IDLE"
-                entry.frequency = 0
-                entry.duration = idle_time
-                entry.energy = (config.idle_power / 1000.0) * idle_time
-                schedule.append(entry)
-                current_time += idle_time
-            else:
-                break
+            entry = ScheduleEntry()
+            entry.start_time = current_time
+            entry.task_name = "IDLE"
+            entry.frequency = 0
+            entry.duration = idle_time
+            entry.energy = (config.idle_power / 1000.0) * idle_time
+            schedule.append(entry)
+            current_time += idle_time
         else:
-            # EDF: always max freq
+            # EDF: Pick job with earliest deadline among ready jobs
+            earliest_job = min(ready_jobs, key=lambda j: j.absolute_deadline)
+            
+            # Always use max frequency for EDF
             freq_index = 0
             freq = config.frequencies[freq_index]
-
+            
+            # Initialize remaining time if first time scheduled
             if earliest_job.remaining_time is None:
                 earliest_job.remaining_time = earliest_job.task.wcet[freq_index]
-
-            # preemption: next release with earlier deadline
-            next_event_time = config.max_time
+            
+            # Find next preemption point: when a job with EARLIER deadline arrives
+            next_event = config.max_time
             for j in jobs:
-                if (not j.completed and
-                    j.release_time > current_time and
-                    j.release_time < next_event_time and
+                if (not j.completed and 
+                    j.release_time > current_time and 
+                    j.release_time < next_event and
                     j.absolute_deadline < earliest_job.absolute_deadline):
-                    next_event_time = j.release_time
-
+                    next_event = j.release_time
+            
+            # Execute for minimum of: remaining time, time until preemption, time until max_time
             execution_time = min(
                 earliest_job.remaining_time,
-                next_event_time - current_time,
+                next_event - current_time,
                 config.max_time - current_time
             )
-
-            if execution_time > 0:
-                power = config.powers[freq_index]
-                energy = (power / 1000.0) * execution_time
-
-                entry = ScheduleEntry()
-                entry.start_time = current_time
-                entry.task_name = earliest_job.task.name
-                entry.frequency = freq
-                entry.duration = execution_time
-                entry.energy = energy
-                schedule.append(entry)
-
-                current_time += execution_time
-                earliest_job.remaining_time -= execution_time
-
-                if earliest_job.remaining_time <= 0:
-                    earliest_job.completed = True
-            else:
+            
+            if execution_time <= 0:
                 break
+            
+            # Create schedule entry
+            power = config.powers[freq_index]
+            energy = (power / 1000.0) * execution_time
+            
+            entry = ScheduleEntry()
+            entry.start_time = current_time
+            entry.task_name = earliest_job.task.name
+            entry.frequency = freq
+            entry.duration = execution_time
+            entry.energy = energy
+            schedule.append(entry)
+            
+            # Update state
+            current_time += execution_time
+            earliest_job.remaining_time -= execution_time
+            
+            if earliest_job.remaining_time <= 0:
+                earliest_job.completed = True
 
     return schedule
 
